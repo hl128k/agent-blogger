@@ -1,0 +1,17 @@
+[project]
+name = "agent-blogger"
+version = "0.1.0"
+description = "Turn agent transcripts into blog-ready Hexo Markdown drafts"
+requires-python = ">=3.10"
+readme = "SKILL.md"
+license = { text = "MIT" }
+authors = [
+  { name = "hl128k" }
+]
+
+[project.scripts]
+agent-blogger = "scripts.agent_blogger:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
