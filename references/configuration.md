@@ -2,86 +2,79 @@
 
 ## Format
 
-V1 uses JSON config.
+V1 recommends YAML config, while keeping JSON compatible for older setups.
 
 Reasons:
 
-- stdlib-only parser support
+- human-friendly for layered config
 - easy to validate
 - easy for agents to generate or patch
 - can reference secrets through environment variables instead of storing raw tokens
 
 ## Example
 
-```json
-{
-  "source": {
-    "type": "codex-jsonl",
-    "path": "/path/to/session.jsonl"
-  },
-  "content_profile": {
-    "include_system_env": true,
-    "include_dev_env": true,
-    "include_commands": true,
-    "include_file_changes": true,
-    "include_failed_attempts": true,
-    "include_timeline": false,
-    "include_raw_logs": false,
-    "max_message_chars": 4000
-  },
-  "style_profile": {
-    "tone": "简洁、直接、偏实战",
-    "perspective": "first-person",
-    "language": "zh-CN",
-    "verbosity": "medium",
-    "intro_style": "problem-first",
-    "section_order": [
-      "background",
-      "symptoms",
-      "investigation",
-      "root_cause",
-      "fix",
-      "environment",
-      "files",
-      "commands",
-      "lesson"
-    ]
-  },
-  "renderer": {
-    "type": "hexo",
-    "post_dir": "source/_posts",
-    "slug_pattern": "{date}-{slug}",
-    "default_categories": ["AI开发", "Agent实践"],
-    "default_tags": ["agent-blogger"],
-    "front_matter": {
-      "author": "hl128k",
-      "comments": true,
-      "toc": true
-    }
-  },
-  "workflow": {
-    "mode": "review"
-  },
-  "publish": {
-    "enabled": false,
-    "mode": "git",
-    "git": {
-      "repo_dir": "/path/to/blog",
-      "remote": "origin",
-      "branch": "main",
-      "commit": true,
-      "push": true,
-      "commit_message": "chore(blog): publish {title}"
-    },
-    "github_api": {
-      "repo": "owner/repo",
-      "branch": "main",
-      "path_template": "source/_posts/{filename}",
-      "token_env": "GITHUB_TOKEN",
-      "commit_message": "chore(blog): publish {title}"
-    }
-  }
-}
+```yaml
+source:
+  type: current-session
+  path: null
+  session_key: null
+  base_dir: .
+content_profile:
+  include_system_env: true
+  include_dev_env: true
+  include_commands: true
+  include_file_changes: true
+  include_failed_attempts: true
+  include_timeline: false
+  include_raw_logs: false
+  max_message_chars: 4000
+style_profile:
+  tone: 简洁、直接、偏实战
+  perspective: first-person
+  language: zh-CN
+  verbosity: medium
+  intro_style: problem-first
+  section_order:
+  - background
+  - symptoms
+  - investigation
+  - root_cause
+  - fix
+  - environment
+  - files
+  - commands
+  - lesson
+renderer:
+  type: hexo
+  post_dir: source/_posts
+  slug_pattern: '{date}-{slug}'
+  default_categories:
+  - AI开发
+  - Agent实践
+  default_tags:
+  - agent-blogger
+  front_matter:
+    author: hl128k
+    comments: true
+    toc: true
+workflow:
+  mode: review
+publish:
+  enabled: false
+  mode: git
+  git:
+    repo_dir: /path/to/blog
+    remote: origin
+    branch: main
+    commit: true
+    push: true
+    commit_message: 'chore(blog): publish {title}'
+  github_api:
+    repo: owner/repo
+    branch: main
+    path_template: source/_posts/{filename}
+    token_env: GITHUB_TOKEN
+    commit_message: 'chore(blog): publish {title}'
 ```
 
 ## Source config
@@ -91,9 +84,26 @@ Controls **where the transcript comes from**.
 Recommended knobs:
 
 - `type`
-  - `codex-jsonl`, `generic-json`, `markdown-transcript`, or later `openclaw-session-history`
+  - `current-session` by default for host agents such as OpenClaw
+  - `openclaw-session` / `openclaw-session-history` when selecting a specific OpenClaw session
+  - `codex-jsonl`, `generic-json`, or `markdown-transcript` for file mode
 - `path`
-  - local transcript path when using file mode
+  - optional local transcript path when using file mode
+- `session_key`
+  - optional OpenClaw session key; CLI `--session-key` overrides this value
+- `base_dir`
+  - base directory used to resolve a relative `path`
+
+Resolution precedence:
+
+```text
+CLI --source-path or positional INPUT > config source.path > host current session
+CLI --source > config source.type > current-session
+CLI --session-key > config source.session_key
+CLI --base-dir > config source.base_dir
+```
+
+For a pure CLI run, `current-session` must be materialized by the host agent first; otherwise provide `INPUT`, `--source-path`, or `source.path`.
 
 ## Content profile
 
@@ -188,31 +198,27 @@ CLI overrides:
 
 ```bash
 # force publishing even when config says enabled=false
-python3 scripts/agent_blogger.py pipeline session.jsonl --config agent-blogger.config.json --publish
+python3 scripts/agent_blogger.py pipeline session.jsonl --config agent-blogger.config.yaml --publish
 
 # disable publishing even when config says enabled=true
-python3 scripts/agent_blogger.py pipeline session.jsonl --config agent-blogger.config.json --no-publish
+python3 scripts/agent_blogger.py pipeline session.jsonl --config agent-blogger.config.yaml --no-publish
 ```
 
 ### `mode: git`
 
 Use this when the blog repository already exists locally.
 
-```json
-{
-  "publish": {
-    "enabled": true,
-    "mode": "git",
-    "git": {
-      "repo_dir": "/path/to/blog",
-      "remote": "origin",
-      "branch": "main",
-      "commit": true,
-      "push": true,
-      "commit_message": "chore(blog): publish {title}"
-    }
-  }
-}
+```yaml
+publish:
+  enabled: true
+  mode: git
+  git:
+    repo_dir: /path/to/blog
+    remote: origin
+    branch: main
+    commit: true
+    push: true
+    commit_message: 'chore(blog): publish {title}'
 ```
 
 Behavior:
@@ -229,26 +235,22 @@ Authentication is handled by existing git credentials, such as:
 - git credential helper
 - CI-provided git credentials
 
-Do not put raw GitHub tokens in this JSON file.
+Do not put raw GitHub tokens in this config file.
 
 ### `mode: github-api`
 
 Use this when you want to push directly to GitHub without requiring a local blog checkout.
 
-```json
-{
-  "publish": {
-    "enabled": true,
-    "mode": "github-api",
-    "github_api": {
-      "repo": "owner/repo",
-      "branch": "main",
-      "path_template": "source/_posts/{filename}",
-      "token_env": "GITHUB_TOKEN",
-      "commit_message": "chore(blog): publish {title}"
-    }
-  }
-}
+```yaml
+publish:
+  enabled: true
+  mode: github-api
+  github_api:
+    repo: owner/repo
+    branch: main
+    path_template: source/_posts/{filename}
+    token_env: GITHUB_TOKEN
+    commit_message: 'chore(blog): publish {title}'
 ```
 
 Set the token outside the config:
@@ -275,7 +277,7 @@ For the first release, keep defaults conservative:
 - one source at a time
 - one post at a time
 - one output format: Hexo Markdown
-- one config file: JSON
+- one config file: YAML, with JSON compatibility
 - workflow defaults to `review`
 - publish disabled by default
 - secrets referenced by environment variable, not stored in the repo

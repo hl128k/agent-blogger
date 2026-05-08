@@ -8,6 +8,9 @@ license = { text = "MIT" }
 authors = [
   { name = "hl128k" }
 ]
+dependencies = [
+  "PyYAML>=6.0"
+]
 
 [project.scripts]
 agent-blogger = "scripts.agent_blogger:main"

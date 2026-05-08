@@ -25,7 +25,7 @@ Treat this repository's first version as intentionally narrow:
 
 - **Sources**: OpenClaw session history and Codex transcript files first
 - **Output**: Hexo Markdown first
-- **Configuration**: content profile + style profile + renderer config + optional publish config
+- **Configuration**: YAML-first source config + content profile + style profile + renderer config + optional publish config
 - **Architecture**: light interfaces, no heavy plugin framework
 
 Keep publishing explicit and opt-in: generate the post first, then optionally push it through a small number of backends.
@@ -76,7 +76,7 @@ Keep **content selection** separate from **writing style**:
 - style profile decides how the post sounds
 - renderer decides the final output format
 
-Use `references/configuration.md` for the current config layout and example values.
+Use `references/configuration.md` for the current YAML-first config layout, example values, and JSON compatibility notes.
 
 ### 5. Render Hexo output
 

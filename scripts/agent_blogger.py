@@ -11,6 +11,11 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+try:
+    import yaml
+except ImportError:  # pragma: no cover - optional at runtime
+    yaml = None
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +41,7 @@ ENV_PATTERNS = {
 }
 
 SAMPLE_CONFIG = {
-    "source": {"type": "codex-jsonl", "path": "/path/to/session.jsonl"},
+    "source": {"type": "current-session", "path": None, "session_key": None, "base_dir": "."},
     "content_profile": {
         "include_system_env": True,
         "include_dev_env": True,
@@ -144,16 +149,23 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Reduce agent transcripts into blog-ready Hexo Markdown.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    p_init = subparsers.add_parser("init-config", help="Write a sample JSON config file")
-    p_init.add_argument("--output", default="agent-blogger.config.json")
+    p_init = subparsers.add_parser("init-config", help="Write a sample config file")
+    p_init.add_argument("--output", default="agent-blogger.config.yaml")
 
     p_inspect = subparsers.add_parser("inspect", help="Inspect a transcript source")
-    p_inspect.add_argument("input")
+    p_inspect.add_argument("input", nargs="?")
+    p_inspect.add_argument("--source-path")
     p_inspect.add_argument("--source", default="auto")
+    p_inspect.add_argument("--session-key")
+    p_inspect.add_argument("--base-dir")
+    p_inspect.add_argument("--config")
 
     p_reduce = subparsers.add_parser("reduce", help="Reduce transcript into IssueContext JSON")
-    p_reduce.add_argument("input")
+    p_reduce.add_argument("input", nargs="?")
+    p_reduce.add_argument("--source-path")
     p_reduce.add_argument("--source", default="auto")
+    p_reduce.add_argument("--session-key")
+    p_reduce.add_argument("--base-dir")
     p_reduce.add_argument("--config")
     p_reduce.add_argument("--output")
 
@@ -164,8 +176,11 @@ def parse_args() -> argparse.Namespace:
     add_publish_flags(p_render)
 
     p_pipeline = subparsers.add_parser("pipeline", help="Run transcript -> IssueContext -> Hexo Markdown")
-    p_pipeline.add_argument("input")
+    p_pipeline.add_argument("input", nargs="?")
+    p_pipeline.add_argument("--source-path")
     p_pipeline.add_argument("--source", default="auto")
+    p_pipeline.add_argument("--session-key")
+    p_pipeline.add_argument("--base-dir")
     p_pipeline.add_argument("--config")
     p_pipeline.add_argument("--output")
     add_publish_flags(p_pipeline)
@@ -176,12 +191,78 @@ def parse_args() -> argparse.Namespace:
 def load_config(path: str | None) -> dict[str, Any]:
     if not path:
         return json.loads(json.dumps(SAMPLE_CONFIG))
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+    config_path = Path(path)
+    text = config_path.read_text(encoding="utf-8")
+    suffix = config_path.suffix.lower()
+    if suffix in {".yaml", ".yml"}:
+        if yaml is None:
+            raise RuntimeError("PyYAML is required to read YAML config files")
+        data = yaml.safe_load(text) or {}
+    elif suffix == ".json":
+        data = json.loads(text)
+    else:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            if yaml is None:
+                raise RuntimeError("PyYAML is required to read non-JSON config files")
+            data = yaml.safe_load(text) or {}
+    if not isinstance(data, dict):
+        raise TypeError("config root must be a mapping")
+    return data
+
+
+def write_config(path: str | Path, data: dict[str, Any]) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    suffix = path.suffix.lower()
+    if suffix == ".json":
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to write YAML config files")
+    path.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=False), encoding="utf-8")
 
 
 def write_json(path: str | Path, data: dict[str, Any]) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def resolve_source_path(path_str: str, base_dir: str | None = None) -> Path:
+    path = Path(path_str)
+    if path.is_absolute() or not base_dir:
+        return path
+    return Path(base_dir).expanduser() / path
+
+
+def resolve_source_options(args: argparse.Namespace, config: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
+    source_config = config.get("source", {}) or {}
+    if not isinstance(source_config, dict):
+        raise TypeError("source config must be a mapping")
+
+    cli_path = getattr(args, "source_path", None) or getattr(args, "input", None)
+    config_path = source_config.get("path")
+    path = cli_path or config_path
+
+    cli_source = getattr(args, "source", None)
+    if cli_source and cli_source != "auto":
+        source = cli_source
+    elif cli_path:
+        source = "auto"
+    else:
+        source = str(source_config.get("type") or "current-session")
+
+    cli_base_dir = getattr(args, "base_dir", None)
+    base_dir = cli_base_dir if cli_base_dir is not None else (None if cli_path else source_config.get("base_dir"))
+    session_key = getattr(args, "session_key", None) or source_config.get("session_key")
+
+    if not path:
+        if source in {"current-session", "openclaw-current-session", "openclaw-session", "openclaw-session-history"}:
+            raise ValueError("current OpenClaw session input must be collected by the host agent; for CLI runs provide INPUT, --source-path, or source.path")
+        raise ValueError("missing transcript input; provide INPUT, --source-path, or source.path")
+    return str(path), source, str(base_dir) if base_dir else None, str(session_key) if session_key else None
 
 
 def dedupe_keep_order(items: Iterable[str]) -> list[str]:
@@ -425,8 +506,8 @@ def parse_markdown_like(path: Path, source_name: str) -> SessionSnapshot:
     return snapshot
 
 
-def load_snapshot(path_str: str, source: str = "auto") -> SessionSnapshot:
-    path = Path(path_str)
+def load_snapshot(path_str: str, source: str = "auto", base_dir: str | None = None, session_key: str | None = None) -> SessionSnapshot:
+    path = resolve_source_path(path_str, base_dir)
     if not path.exists():
         raise FileNotFoundError(f"input not found: {path}")
 
@@ -439,10 +520,17 @@ def load_snapshot(path_str: str, source: str = "auto") -> SessionSnapshot:
             source = "markdown-transcript"
 
     if path.suffix.lower() == ".jsonl":
-        return parse_jsonl(path, source)
-    if path.suffix.lower() == ".json":
-        return parse_json(path, source)
-    return parse_markdown_like(path, source)
+        snapshot = parse_jsonl(path, source)
+    elif path.suffix.lower() == ".json":
+        snapshot = parse_json(path, source)
+    else:
+        snapshot = parse_markdown_like(path, source)
+
+    if base_dir:
+        snapshot.metadata.setdefault("base_dir", str(Path(base_dir).expanduser()))
+    if session_key:
+        snapshot.metadata["session_key"] = session_key
+    return snapshot
 
 
 def enrich_snapshot(snapshot: SessionSnapshot) -> None:
@@ -933,18 +1021,21 @@ def main() -> int:
     args = parse_args()
 
     if args.command == "init-config":
-        write_json(args.output, SAMPLE_CONFIG)
+        write_config(args.output, SAMPLE_CONFIG)
         print(f"wrote sample config to {args.output}")
         return 0
 
     if args.command == "inspect":
-        snapshot = load_snapshot(args.input, args.source)
+        config = load_config(args.config) if args.config else {}
+        input_path, source, base_dir, session_key = resolve_source_options(args, config)
+        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
         print(json.dumps(snapshot_summary(snapshot), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "reduce":
         config = load_config(args.config)
-        snapshot = load_snapshot(args.input, args.source)
+        input_path, source, base_dir, session_key = resolve_source_options(args, config)
+        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
         issue = reduce_snapshot(snapshot, config)
         payload = asdict(issue)
         if args.output:
@@ -966,7 +1057,8 @@ def main() -> int:
 
     if args.command == "pipeline":
         config = load_config(args.config)
-        snapshot = load_snapshot(args.input, args.source)
+        input_path, source, base_dir, session_key = resolve_source_options(args, config)
+        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
         issue = reduce_snapshot(snapshot, config)
         markdown = render_hexo(issue, config)
         output_path = default_output_path(issue, config, args.output)
