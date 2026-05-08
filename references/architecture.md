@@ -26,7 +26,7 @@ Primary goals for V1:
 Source material
   -> SessionSnapshot
   -> IssueContext
-  -> ArticleDraft
+  -> Prompt/Profile-guided ArticleDraft
   -> Hexo Markdown
   -> optional Publisher
 ```
@@ -65,7 +65,16 @@ Responsibility:
 
 Keep this separate from `ContentProfile`.
 
-### 4. Renderer
+### 4. PromptProfile / TemplateProfile
+
+Responsibility:
+
+- keep prompt instructions configurable instead of hard-coded
+- keep blog skeleton, section order, headings, and reusable section text configurable
+- decide where optional facts such as system/development environment appear
+- remain separate from factual extraction and final file publishing
+
+### 5. Renderer
 
 Responsibility:
 
@@ -77,7 +86,7 @@ Initial implementation:
 
 - `hexo-markdown`
 
-### 5. Publisher
+### 6. Publisher
 
 Responsibility:
 
@@ -238,7 +247,7 @@ Prefer this tradeoff:
 
 - **light interfaces**
 - **deterministic local extraction**
-- **config-driven rendering**
+- **config-driven prompting, templating, and rendering**
 - **small, explicit publishing backends**
 - **narrow V1 scope**
 

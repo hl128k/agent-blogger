@@ -40,6 +40,30 @@ ENV_PATTERNS = {
     "tools": re.compile(r"(?i)\b(openclaw|codex|hexo|git|github actions|github|docker|maven|gradle)\b"),
 }
 
+DEFAULT_SECTION_ORDER = [
+    "background",
+    "symptoms",
+    "investigation",
+    "root_cause",
+    "fix",
+    "environment",
+    "files",
+    "commands",
+    "lesson",
+]
+
+DEFAULT_SECTION_HEADINGS = {
+    "background": "背景",
+    "symptoms": "问题现象",
+    "investigation": "排查过程",
+    "root_cause": "根因判断",
+    "fix": "解决方案",
+    "environment": "环境信息",
+    "files": "涉及文件",
+    "commands": "关键命令",
+    "lesson": "复盘与经验",
+}
+
 SAMPLE_CONFIG = {
     "source": {"type": "current-session", "path": None, "session_key": None, "base_dir": "."},
     "content_profile": {
@@ -58,6 +82,9 @@ SAMPLE_CONFIG = {
         "language": "zh-CN",
         "verbosity": "medium",
         "intro_style": "problem-first",
+    },
+    "template_profile": {
+        "type": "hexo-technical-post",
         "section_order": [
             "background",
             "symptoms",
@@ -69,6 +96,26 @@ SAMPLE_CONFIG = {
             "commands",
             "lesson",
         ],
+        "section_headings": {
+            "background": "背景",
+            "symptoms": "问题现象",
+            "investigation": "排查过程",
+            "root_cause": "根因判断",
+            "fix": "解决方案",
+            "environment": "环境信息",
+            "files": "涉及文件",
+            "commands": "关键命令",
+            "lesson": "复盘与经验",
+        },
+        "section_templates": {
+            "background": "{summary}\n\n这篇记录采用 **{tone}** 的复盘方式，重点保留问题、处理过程和最终结论。"
+        },
+        "optional_sections": ["environment", "files", "commands"],
+    },
+    "prompt_profile": {
+        "system_prompt": "你是一名技术博客编辑，把结构化问题上下文整理成清晰、真实、可复盘的技术文章。不要编造不存在的环境、命令或结论。",
+        "draft_prompt_template": "请根据下面的 IssueContext 写一篇 {language} 技术博客。语气：{tone}。视角：{perspective}。模板：{template_type}。章节顺序：{section_order}。",
+        "include_reduced_context": True,
     },
     "renderer": {
         "type": "hexo",
@@ -175,6 +222,11 @@ def parse_args() -> argparse.Namespace:
     p_render.add_argument("--output")
     add_publish_flags(p_render)
 
+    p_prompt = subparsers.add_parser("render-prompt", help="Render a drafting prompt from IssueContext JSON and config")
+    p_prompt.add_argument("input", help="Path to IssueContext JSON")
+    p_prompt.add_argument("--config")
+    p_prompt.add_argument("--output")
+
     p_pipeline = subparsers.add_parser("pipeline", help="Run transcript -> IssueContext -> Hexo Markdown")
     p_pipeline.add_argument("input", nargs="?")
     p_pipeline.add_argument("--source-path")
@@ -228,6 +280,12 @@ def write_json(path: str | Path, data: dict[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def write_text_file(path: str | Path, text: str) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
 
 
 def resolve_source_path(path_str: str, base_dir: str | None = None) -> Path:
@@ -699,10 +757,126 @@ def issue_from_json(path: str | Path) -> IssueContext:
     return IssueContext(**data)
 
 
+def mapping_config(config: dict[str, Any], key: str) -> dict[str, Any]:
+    value = config.get(key, {}) or {}
+    if not isinstance(value, dict):
+        raise TypeError(f"{key} config must be a mapping")
+    return value
+
+
+def configured_section_order(config: dict[str, Any]) -> list[str]:
+    template = mapping_config(config, "template_profile")
+    style = mapping_config(config, "style_profile")
+    raw = template.get("section_order") or template.get("include_sections") or style.get("section_order") or DEFAULT_SECTION_ORDER
+    if not isinstance(raw, list):
+        raise TypeError("template_profile.section_order must be a list")
+    return [str(item) for item in raw if str(item).strip()]
+
+
+def section_heading(config: dict[str, Any], key: str) -> str:
+    template = mapping_config(config, "template_profile")
+    headings = template.get("section_headings", {}) or {}
+    if not isinstance(headings, dict):
+        raise TypeError("template_profile.section_headings must be a mapping")
+    return str(headings.get(key) or DEFAULT_SECTION_HEADINGS.get(key) or key.replace("_", " ").title())
+
+
+def markdown_list(items: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in items)
+
+
+def markdown_commands(commands: list[str]) -> str:
+    if not commands:
+        return ""
+    return "```sh\n" + "\n".join(commands) + "\n```"
+
+
+def markdown_key_values(mapping: dict[str, list[str]]) -> str:
+    lines: list[str] = []
+    for key, values in mapping.items():
+        if values:
+            lines.append(f"- **{key}**: {', '.join(values)}")
+    return "\n".join(lines)
+
+
+def template_vars(issue: IssueContext, config: dict[str, Any]) -> dict[str, str]:
+    style = mapping_config(config, "style_profile")
+    template = mapping_config(config, "template_profile")
+    return {
+        "title": issue.topic,
+        "topic": issue.topic,
+        "summary": issue.summary,
+        "symptoms": markdown_list(issue.symptoms),
+        "investigation": markdown_list(issue.investigation_steps),
+        "failed_attempts": markdown_list(issue.failed_attempts),
+        "root_cause": issue.root_cause,
+        "fix": issue.fix,
+        "environment": markdown_key_values(issue.environment),
+        "files": markdown_list(issue.files_changed),
+        "commands": markdown_commands(issue.commands_used),
+        "lesson": markdown_list(issue.lessons),
+        "lessons": markdown_list(issue.lessons),
+        "keywords": ", ".join(issue.keywords),
+        "tone": str(style.get("tone", "简洁、直接、偏实战")),
+        "language": str(style.get("language", "zh-CN")),
+        "perspective": str(style.get("perspective", "first-person")),
+        "verbosity": str(style.get("verbosity", "medium")),
+        "intro_style": str(style.get("intro_style", "problem-first")),
+        "template_type": str(template.get("type", "hexo-technical-post")),
+        "section_order": ", ".join(configured_section_order(config)),
+        "issue_json": json.dumps(asdict(issue), ensure_ascii=False, indent=2),
+    }
+
+
+def safe_format_template(template: str, values: dict[str, str]) -> str:
+    try:
+        return template.format(**values)
+    except KeyError as exc:
+        missing = exc.args[0]
+        raise KeyError(f"unknown template variable: {missing}") from exc
+
+
+def render_section_with_heading(config: dict[str, Any], key: str, body: str) -> str:
+    body = body.strip()
+    if not body:
+        return ""
+    return f"## {section_heading(config, key)}\n\n{body}"
+
+
+def section_templates(config: dict[str, Any]) -> dict[str, str]:
+    template = mapping_config(config, "template_profile")
+    raw = template.get("section_templates", {}) or {}
+    if not isinstance(raw, dict):
+        raise TypeError("template_profile.section_templates must be a mapping")
+    return {str(key): str(value) for key, value in raw.items()}
+
+
+def render_drafting_prompt(issue: IssueContext, config: dict[str, Any]) -> str:
+    prompt = mapping_config(config, "prompt_profile")
+    values = template_vars(issue, config)
+    system_prompt = str(
+        prompt.get(
+            "system_prompt",
+            "你是一名技术博客编辑，把结构化问题上下文整理成清晰、真实、可复盘的技术文章。不要编造不存在的环境、命令或结论。",
+        )
+    )
+    draft_template = str(
+        prompt.get(
+            "draft_prompt_template",
+            "请根据下面的 IssueContext 写一篇 {language} 技术博客。语气：{tone}。视角：{perspective}。模板：{template_type}。章节顺序：{section_order}。",
+        )
+    )
+    rendered = ["# System Prompt", "", safe_format_template(system_prompt, values).strip(), "", "# Draft Prompt", "", safe_format_template(draft_template, values).strip()]
+    if prompt.get("include_reduced_context", True):
+        rendered.extend(["", "# Reduced IssueContext", "", "```json", values["issue_json"], "```"])
+    return "\n".join(rendered).rstrip() + "\n"
+
+
 def render_hexo(issue: IssueContext, config: dict[str, Any]) -> str:
-    style = config.get("style_profile", {})
-    content = config.get("content_profile", {})
-    renderer = config.get("renderer", {})
+    style = mapping_config(config, "style_profile")
+    content = mapping_config(config, "content_profile")
+    renderer = mapping_config(config, "renderer")
+    template = mapping_config(config, "template_profile")
     front_matter = dict(renderer.get("front_matter", {}))
     date_value = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -730,25 +904,30 @@ def render_hexo(issue: IssueContext, config: dict[str, Any]) -> str:
         front_matter_lines.append(f"{key}: {rendered}")
     front_matter_lines.append("---")
 
-    tone = style.get("tone", "简洁、直接、偏实战")
-    section_order = style.get(
-        "section_order",
-        ["background", "symptoms", "investigation", "root_cause", "fix", "environment", "files", "commands", "lesson"],
+    section_order = configured_section_order(config)
+    section_templates_map = section_templates(config)
+    values = template_vars(issue, config)
+    background_template = section_templates_map.get(
+        "background",
+        "{summary}\n\n这篇记录采用 **{tone}** 的复盘方式，重点保留问题、处理过程和最终结论。",
     )
 
     section_map: dict[str, str] = {
-        "background": f"## 背景\n\n{issue.summary}\n\n这篇记录采用 **{tone}** 的复盘方式，重点保留问题、处理过程和最终结论。",
-        "symptoms": render_bullets("## 问题现象", issue.symptoms),
-        "investigation": render_bullets("## 排查过程", issue.investigation_steps),
-        "root_cause": f"## 根因判断\n\n{issue.root_cause}",
-        "fix": f"## 解决方案\n\n{issue.fix}",
-        "environment": render_key_values("## 环境信息", issue.environment),
-        "files": render_bullets("## 涉及文件", issue.files_changed),
-        "commands": render_commands("## 关键命令", issue.commands_used),
-        "lesson": render_bullets("## 复盘与经验", issue.lessons),
+        "background": render_section_with_heading(config, "background", safe_format_template(background_template, values)),
+        "symptoms": render_section_with_heading(config, "symptoms", markdown_list(issue.symptoms)),
+        "investigation": render_section_with_heading(config, "investigation", markdown_list(issue.investigation_steps)),
+        "root_cause": render_section_with_heading(config, "root_cause", issue.root_cause),
+        "fix": render_section_with_heading(config, "fix", issue.fix),
+        "environment": render_section_with_heading(config, "environment", markdown_key_values(issue.environment)),
+        "files": render_section_with_heading(config, "files", markdown_list(issue.files_changed)),
+        "commands": render_section_with_heading(config, "commands", markdown_commands(issue.commands_used)),
+        "lesson": render_section_with_heading(config, "lesson", markdown_list(issue.lessons)),
     }
 
     sections: list[str] = []
+    optional_sections = set(template.get("optional_sections", ["environment", "files", "commands"]) or [])
+    if not isinstance(optional_sections, set):
+        optional_sections = set(optional_sections)
     for key in section_order:
         if key == "environment" and not (content.get("include_system_env", True) or content.get("include_dev_env", True)):
             continue
@@ -760,11 +939,11 @@ def render_hexo(issue: IssueContext, config: dict[str, Any]) -> str:
             continue
         if key == "investigation" and not issue.investigation_steps:
             continue
-        if key == "environment" and not issue.environment:
+        if key == "environment" and not issue.environment and key in optional_sections:
             continue
-        if key == "files" and not issue.files_changed:
+        if key == "files" and not issue.files_changed and key in optional_sections:
             continue
-        if key == "commands" and not issue.commands_used:
+        if key == "commands" and not issue.commands_used and key in optional_sections:
             continue
         block = section_map.get(key)
         if block:
@@ -1053,6 +1232,17 @@ def main() -> int:
         write_markdown(output_path, markdown)
         print(f"wrote hexo markdown to {output_path}")
         publish_after_write(config, issue, output_path, publish=args.publish, no_publish=args.no_publish)
+        return 0
+
+    if args.command == "render-prompt":
+        config = load_config(args.config)
+        issue = issue_from_json(args.input)
+        prompt = render_drafting_prompt(issue, config)
+        if args.output:
+            write_text_file(args.output, prompt)
+            print(f"wrote drafting prompt to {args.output}")
+        else:
+            print(prompt, end="")
         return 0
 
     if args.command == "pipeline":

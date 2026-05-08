@@ -25,7 +25,7 @@ Treat this repository's first version as intentionally narrow:
 
 - **Sources**: OpenClaw session history and Codex transcript files first
 - **Output**: Hexo Markdown first
-- **Configuration**: YAML-first source config + content profile + style profile + renderer config + optional publish config
+- **Configuration**: YAML-first source config + content profile + style profile + prompt profile + template profile + renderer config + optional publish config
 - **Architecture**: light interfaces, no heavy plugin framework
 
 Keep publishing explicit and opt-in: generate the post first, then optionally push it through a small number of backends.
@@ -70,10 +70,12 @@ If the user only wants a post skeleton, the local reducer output alone may be en
 
 ### 4. Apply writing configuration
 
-Keep **content selection** separate from **writing style**:
+Keep **content selection**, **prompting**, **template shape**, and **rendering** separate:
 
-- content profile decides what blocks appear
+- content profile decides what facts are collected
 - style profile decides how the post sounds
+- prompt profile decides how the reduced context is turned into prose instructions
+- template profile decides section order, headings, and reusable section text
 - renderer decides the final output format
 
 Use `references/configuration.md` for the current YAML-first config layout, example values, and JSON compatibility notes.
@@ -121,4 +123,4 @@ Single-file CLI for transcript inspection, reduction, sample config generation, 
 V1 layering, extension points, data model, and token-saving design notes.
 
 ### `references/configuration.md`
-Config schema, example JSON, and mapping between content/style/renderer/publish knobs.
+Config schema, YAML example, and mapping between content/style/prompt/template/renderer/publish knobs.

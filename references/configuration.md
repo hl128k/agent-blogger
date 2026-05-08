@@ -34,6 +34,8 @@ style_profile:
   language: zh-CN
   verbosity: medium
   intro_style: problem-first
+template_profile:
+  type: hexo-technical-post
   section_order:
   - background
   - symptoms
@@ -44,6 +46,29 @@ style_profile:
   - files
   - commands
   - lesson
+  section_headings:
+    background: 背景
+    symptoms: 问题现象
+    investigation: 排查过程
+    root_cause: 根因判断
+    fix: 解决方案
+    environment: 环境信息
+    files: 涉及文件
+    commands: 关键命令
+    lesson: 复盘与经验
+  section_templates:
+    background: '{summary}
+
+
+      这篇记录采用 **{tone}** 的复盘方式，重点保留问题、处理过程和最终结论。'
+  optional_sections:
+  - environment
+  - files
+  - commands
+prompt_profile:
+  system_prompt: 你是一名技术博客编辑，把结构化问题上下文整理成清晰、真实、可复盘的技术文章。不要编造不存在的环境、命令或结论。
+  draft_prompt_template: 请根据下面的 IssueContext 写一篇 {language} 技术博客。语气：{tone}。视角：{perspective}。模板：{template_type}。章节顺序：{section_order}。
+  include_reduced_context: true
 renderer:
   type: hexo
   post_dir: source/_posts
@@ -144,8 +169,47 @@ Recommended knobs:
   - `short`, `medium`, `long`
 - `intro_style`
   - `problem-first`, `story-first`, `decision-first`
+
+## Template profile
+
+Controls **the blog skeleton and section presets**.
+
+Recommended knobs:
+
+- `type`
+  - template preset name, such as `hexo-technical-post`
 - `section_order`
-  - explicit order of final article sections
+  - ordered section keys used by the renderer
+- `section_headings`
+  - maps section keys to visible Markdown headings
+- `section_templates`
+  - optional per-section text templates; supports variables like `{summary}`, `{tone}`, `{root_cause}`, `{fix}`, `{environment}`
+- `optional_sections`
+  - sections that should disappear when their source facts are empty
+
+Keep template decisions separate from content extraction:
+
+- `content_profile` decides whether system/dev environment facts are collected
+- `template_profile` decides where those facts appear in the final post
+
+## Prompt profile
+
+Controls **the prompt used between summary reduction and final prose generation**.
+
+Recommended knobs:
+
+- `system_prompt`
+  - stable role/instruction prompt for the blog editor agent
+- `draft_prompt_template`
+  - user-facing drafting instruction template; supports the same variables as `section_templates`
+- `include_reduced_context`
+  - append the reduced `IssueContext` JSON to the generated prompt
+
+The CLI can render this prompt without writing a post:
+
+```bash
+python3 scripts/agent_blogger.py render-prompt issue-context.json --config agent-blogger.config.yaml
+```
 
 ## Renderer config
 
