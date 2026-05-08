@@ -1,6 +1,6 @@
 ---
 name: agent-blogger
-description: Turn coding-agent conversations and transcripts into structured blog-ready drafts, especially for OpenClaw sessions, Codex JSONL transcripts, and similar agent logs. Use when the user wants to summarize a debugging session, implementation session, refactor, incident, or architecture discussion into a post; generate Hexo-compatible Markdown with configurable tags/categories/front matter; or extract issue context without dumping an entire raw transcript into the model context.
+description: Turn coding-agent conversations and transcripts into structured blog-ready drafts, especially for OpenClaw sessions, Codex JSONL transcripts, and similar agent logs. Use when the user wants to summarize a debugging session, implementation session, refactor, incident, or architecture discussion into a post; generate Hexo-compatible Markdown with configurable tags/categories/front matter; optionally push the rendered post to a blog repo via git or GitHub API; or extract issue context without dumping an entire raw transcript into the model context.
 ---
 
 # Agent Blogger
@@ -25,10 +25,10 @@ Treat this repository's first version as intentionally narrow:
 
 - **Sources**: OpenClaw session history and Codex transcript files first
 - **Output**: Hexo Markdown first
-- **Configuration**: content profile + style profile + renderer config
+- **Configuration**: content profile + style profile + renderer config + optional publish config
 - **Architecture**: light interfaces, no heavy plugin framework
 
-Do not overbuild dynamic discovery or generalized publishing until the basic OpenClaw/Codex → Hexo pipeline works well.
+Keep publishing explicit and opt-in: generate the post first, then optionally push it through a small number of backends.
 
 ## Workflow
 
@@ -89,6 +89,15 @@ For Hexo output, produce:
 
 Write the generated file into the target Hexo repo's `source/_posts/` directory only after the content looks correct.
 
+### 6. Optionally publish
+
+If `publish.enabled` is set, push the rendered Markdown after generation:
+
+- `git`: local repo commit/push
+- `github-api`: GitHub Contents API using a token from environment
+
+Do not store raw secrets in the config file.
+
 ## Practical Rules
 
 - Prefer smaller, issue-focused inputs over full-session dumps.
@@ -106,4 +115,4 @@ Single-file CLI for transcript inspection, reduction, sample config generation, 
 V1 layering, extension points, data model, and token-saving design notes.
 
 ### `references/configuration.md`
-Config schema, example JSON, and mapping between content/style/renderer knobs.
+Config schema, example JSON, and mapping between content/style/renderer/publish knobs.

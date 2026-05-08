@@ -1,6 +1,6 @@
 # agent-blogger
 
-把 AI Agent 的问题解决过程，整理成可以直接发布的 Hexo 博客草稿。
+把 AI Agent 的问题解决过程，整理成可以发布、也可以直接推送到博客仓库的技术博客草稿。
 
 > 这个 README 是给人看的。`SKILL.md` 是给 OpenClaw / Agent 看的能力说明。
 
@@ -17,7 +17,7 @@
 
 **大量值得记录的排查过程，最后都只停留在聊天记录里。**
 
-`agent-blogger` 想做的，就是把这些 AI Agent 会话中的有效信息抽出来，整理成结构清晰、可以发布的技术博客草稿。
+`agent-blogger` 想做的，就是把这些 AI Agent 会话中的有效信息抽出来，整理成结构清晰、可以发布的技术博客草稿，并在配置允许时直接推送到博客仓库。
 
 它不是要替代人的思考，也不是要把整段历史直接丢给模型；它更像是一个“共享的 AI 记忆整理器”——把问题背景、试错过程、根因判断和最终方案留下来，方便以后回看，也方便再喂给新的 AI。
 
@@ -35,6 +35,7 @@ AI Agent 会话 / 转录记录
   -> 本地提取与压缩
   -> 结构化问题上下文
   -> Hexo Markdown 博客草稿
+  -> 可选推送到博客仓库
 ```
 
 先把这条链路跑顺，再考虑更广的扩展。
@@ -99,6 +100,17 @@ AI Agent 会话 / 转录记录
 source/_posts/
 ```
 
+### 可选自动推送
+
+如果配置了 `publish`，生成 Markdown 后可以继续执行推送动作。
+
+当前支持两种方式：
+
+- `git`：写入本地博客仓库后 `git add` / `git commit` / `git push`
+- `github-api`：通过 GitHub Contents API 直接写入远端仓库
+
+GitHub token 不建议直接写进配置文件，而是通过环境变量引用，例如 `GITHUB_TOKEN`。
+
 ### 可配置写作风格
 
 文章内容和风格都可以配置，例如：
@@ -113,11 +125,11 @@ source/_posts/
 - 章节顺序
 - 默认标签和分类
 
-### 不负责自动发布
+### 不负责构建和部署
 
-`agent-blogger` 只负责生成博客草稿。
+`agent-blogger` 可以把生成好的 Markdown 推送到博客仓库，但不接管 Hexo 构建和站点部署。
 
-构建、部署、发布应该继续交给现有博客仓库和部署流程，例如：
+构建、部署、发布站点本身应该继续交给现有博客仓库和 CI/CD 流程，例如：
 
 - Hexo
 - GitHub Actions
@@ -136,12 +148,13 @@ source/_posts/
 - 提取上下文
 - 压缩成问题摘要
 - 输出 Hexo Markdown
+- 如果配置允许，推送到博客仓库
 
 也就是说，**README 讲给人看，SKILL.md 讲给 Agent 看。**
 
 ### 3.2 手动运行（开发 / 调试）
 
-如果你要本地验证解析、压缩或渲染效果，可以直接用脚本：
+如果你要本地验证解析、压缩、渲染或推送效果，可以直接用脚本：
 
 ```bash
 python3 scripts/agent_blogger.py init-config --output agent-blogger.config.json
@@ -149,6 +162,13 @@ python3 scripts/agent_blogger.py inspect /path/to/session.jsonl
 python3 scripts/agent_blogger.py reduce /path/to/session.jsonl --config agent-blogger.config.json --output issue-context.json
 python3 scripts/agent_blogger.py render-hexo issue-context.json --config agent-blogger.config.json --output /path/to/blog/source/_posts/example.md
 python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-blogger.config.json --output /path/to/blog/source/_posts/example.md
+```
+
+强制推送或禁用推送：
+
+```bash
+python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-blogger.config.json --publish
+python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-blogger.config.json --no-publish
 ```
 
 支持的输入类型会按后缀自动识别：
@@ -206,9 +226,81 @@ python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-
       "comments": true,
       "toc": true
     }
+  },
+  "publish": {
+    "enabled": false,
+    "mode": "git",
+    "git": {
+      "repo_dir": "/path/to/blog",
+      "remote": "origin",
+      "branch": "main",
+      "commit": true,
+      "push": true,
+      "commit_message": "chore(blog): publish {title}"
+    },
+    "github_api": {
+      "repo": "owner/repo",
+      "branch": "main",
+      "path_template": "source/_posts/{filename}",
+      "token_env": "GITHUB_TOKEN",
+      "commit_message": "chore(blog): publish {title}"
+    }
   }
 }
 ```
+
+### 3.4 推送方式
+
+#### 本地 git 推送
+
+适合博客仓库已经 clone 到本地的情况。
+
+```json
+{
+  "publish": {
+    "enabled": true,
+    "mode": "git",
+    "git": {
+      "repo_dir": "/path/to/blog",
+      "remote": "origin",
+      "branch": "main",
+      "commit": true,
+      "push": true,
+      "commit_message": "chore(blog): publish {title}"
+    }
+  }
+}
+```
+
+认证交给现有 git 环境，例如 SSH key、`gh auth login` 或 git credential helper。
+
+#### GitHub API 推送
+
+适合没有本地博客仓库，只想直接写入 GitHub 的情况。
+
+```json
+{
+  "publish": {
+    "enabled": true,
+    "mode": "github-api",
+    "github_api": {
+      "repo": "owner/repo",
+      "branch": "main",
+      "path_template": "source/_posts/{filename}",
+      "token_env": "GITHUB_TOKEN",
+      "commit_message": "chore(blog): publish {title}"
+    }
+  }
+}
+```
+
+然后在运行环境里设置：
+
+```bash
+export GITHUB_TOKEN="github_pat_xxx"
+```
+
+建议使用 GitHub fine-grained token，只给目标博客仓库的 Contents 写权限。
 
 ## 4. 技术栈
 
@@ -221,13 +313,15 @@ python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-
 - Codex JSONL / JSON / Markdown 转录解析
 - OpenClaw 会话历史适配
 - 本地正则提取与上下文压缩
+- Git / GitHub Contents API 推送
 
 ### 设计取向
 
 - 轻接口
 - 先归一化，再推理
 - 内容选择和写作风格分离
-- V1 先只做 OpenClaw / Codex → Hexo
+- 渲染和推送分离
+- V1 先只做 OpenClaw / Codex → Hexo → 可选推送
 
 当前不打算在第一阶段引入这些东西：
 
@@ -246,6 +340,7 @@ python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-
 - OpenClaw
 - Codex
 - Hexo
+- GitHub
 - 各类 AI Coding / Vibe Coding 工具
 
 最后，感谢那些原本只会沉在聊天记录里的问题解决过程。

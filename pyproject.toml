@@ -3,7 +3,7 @@ name = "agent-blogger"
 version = "0.1.0"
 description = "Turn agent transcripts into blog-ready Hexo Markdown drafts"
 requires-python = ">=3.10"
-readme = "SKILL.md"
+readme = "README.md"
 license = { text = "MIT" }
 authors = [
   { name = "hl128k" }

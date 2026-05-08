@@ -10,6 +10,7 @@ Primary goals for V1:
 - avoid feeding full raw transcripts to the model
 - generate **Hexo-compatible Markdown** first
 - keep stable extension points without building a heavy plugin system
+- allow an optional publish step after Markdown generation
 
 ## Non-goals for V1
 
@@ -17,7 +18,7 @@ Primary goals for V1:
 - many blog engines at once
 - visual UI
 - perfect automatic semantic understanding of every transcript
-- fully automated publishing workflows
+- fully automated publishing workflows beyond a few explicit backends
 
 ## Pipeline
 
@@ -27,11 +28,12 @@ Source material
   -> IssueContext
   -> ArticleDraft
   -> Hexo Markdown
+  -> optional Publisher
 ```
 
 ## Stable extension points
 
-V1 should keep these four extension points stable.
+V1 should keep these extension points stable.
 
 ### 1. SourceAdapter
 
@@ -46,13 +48,6 @@ Initial implementations:
 - `openclaw-session-history`
 - `codex-jsonl`
 
-Suggested conceptual interface:
-
-```python
-class SourceAdapter(Protocol):
-    def load(self, source: str | Path) -> SessionSnapshot: ...
-```
-
 ### 2. ContextReducer
 
 Responsibility:
@@ -60,13 +55,6 @@ Responsibility:
 - shrink large session material into a compact issue-oriented representation
 - extract commands, files, errors, environment hints, timeline facts
 - prepare compact reasoning input
-
-Suggested conceptual interface:
-
-```python
-class ContextReducer(Protocol):
-    def reduce(self, snapshot: SessionSnapshot, config: ContentProfile) -> IssueContext: ...
-```
 
 ### 3. StyleProfile
 
@@ -81,13 +69,26 @@ Keep this separate from `ContentProfile`.
 
 Responsibility:
 
-- convert an `ArticleDraft` or `IssueContext` into final output
+- convert an `ArticleDraft` or `IssueContext` into final Markdown
 - apply target format rules
 - write front matter and body
 
 Initial implementation:
 
 - `hexo-markdown`
+
+### 5. Publisher
+
+Responsibility:
+
+- take rendered Markdown and optionally push it to a destination
+- keep auth and transport outside the reducer
+- support a small number of explicit backends
+
+Initial implementations:
+
+- `git`
+- `github-api`
 
 ## Core data model
 
@@ -213,7 +214,22 @@ Renderer concerns:
 - stable section order
 - output path under `source/_posts/`
 
-Publishing concerns should stay outside the core reducer.
+Publishing concerns:
+
+- keep outside the reducer
+- be explicit and opt-in
+- only push after the Markdown is written and verified
+
+## Publisher strategy
+
+Publisher concerns should stay separate from content reduction.
+
+Keep these rules:
+
+- auth is supplied through git credentials or an environment variable
+- token secrets should not be hard-coded in config
+- the same rendered file can be pushed by local git or GitHub Contents API
+- the publish step should fail clearly if the destination repo or token is missing
 
 ## Recommended implementation bias
 
@@ -222,6 +238,7 @@ Prefer this tradeoff:
 - **light interfaces**
 - **deterministic local extraction**
 - **config-driven rendering**
+- **small, explicit publishing backends**
 - **narrow V1 scope**
 
 Avoid this in V1:
