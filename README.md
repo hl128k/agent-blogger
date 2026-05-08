@@ -227,6 +227,9 @@ python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-
       "toc": true
     }
   },
+  "workflow": {
+    "mode": "review"
+  },
   "publish": {
     "enabled": false,
     "mode": "git",
@@ -249,7 +252,15 @@ python3 scripts/agent_blogger.py pipeline /path/to/session.jsonl --config agent-
 }
 ```
 
-### 3.4 推送方式
+### 3.4 工作流模式
+
+`workflow.mode` 控制默认行为：
+
+- `draft`：只生成 Markdown
+- `review`：生成 Markdown，等待 `--publish`
+- `publish`：生成后自动推送
+
+### 3.5 推送方式
 
 #### 本地 git 推送
 

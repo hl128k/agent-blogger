@@ -73,6 +73,9 @@ SAMPLE_CONFIG = {
         "default_tags": ["agent-blogger"],
         "front_matter": {"author": "hl128k", "comments": True, "toc": True},
     },
+    "workflow": {
+        "mode": "review",
+    },
     "publish": {
         "enabled": False,
         "mode": "git",
@@ -740,11 +743,28 @@ def format_publish_template(template: str, issue: IssueContext, output_path: Pat
     return template.format(**publish_template_vars(issue, output_path))
 
 
+def workflow_mode(config: dict[str, Any]) -> str:
+    workflow_config = config.get("workflow", {}) or {}
+    mode = workflow_config.get("mode")
+    if isinstance(mode, str) and mode.strip():
+        normalized = mode.strip().lower()
+        if normalized not in {"draft", "review", "publish"}:
+            raise ValueError(f"unsupported workflow mode: {mode}")
+        return normalized
+
+    # Backward compatibility for older configs that only had publish.enabled.
+    publish_config = config.get("publish", {}) or {}
+    if publish_config.get("enabled", False):
+        return "publish"
+    return "draft"
+
+
 def should_publish(config: dict[str, Any], publish: bool = False, no_publish: bool = False) -> bool:
     if no_publish:
         return False
-    publish_config = config.get("publish", {}) or {}
-    return bool(publish or publish_config.get("enabled", False))
+    if publish:
+        return True
+    return workflow_mode(config) == "publish"
 
 
 def publish_after_write(config: dict[str, Any], issue: IssueContext, output_path: Path, publish: bool = False, no_publish: bool = False) -> None:

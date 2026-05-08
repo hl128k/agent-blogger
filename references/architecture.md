@@ -84,6 +84,7 @@ Responsibility:
 - take rendered Markdown and optionally push it to a destination
 - keep auth and transport outside the reducer
 - support a small number of explicit backends
+- obey the workflow mode (`draft`, `review`, `publish`)
 
 Initial implementations:
 

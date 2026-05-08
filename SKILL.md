@@ -91,7 +91,13 @@ Write the generated file into the target Hexo repo's `source/_posts/` directory 
 
 ### 6. Optionally publish
 
-If `publish.enabled` is set, push the rendered Markdown after generation:
+Use `workflow.mode` to control the default behavior:
+
+- `draft`: stop after writing Markdown
+- `review`: stop after writing Markdown unless explicitly published
+- `publish`: push automatically after generation
+
+If publishing is enabled, push the rendered Markdown after generation:
 
 - `git`: local repo commit/push
 - `github-api`: GitHub Contents API using a token from environment

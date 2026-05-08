@@ -59,6 +59,9 @@ Reasons:
       "toc": true
     }
   },
+  "workflow": {
+    "mode": "review"
+  },
   "publish": {
     "enabled": false,
     "mode": "git",
@@ -153,9 +156,20 @@ Recommended knobs:
 - `front_matter`
   - additional keys merged into Hexo front matter
 
+## Workflow config
+
+Controls **whether the run stops at a draft, waits for review, or publishes automatically**.
+
+Recommended knob:
+
+- `mode`
+  - `draft`: only write Markdown
+  - `review`: write Markdown and wait for explicit `--publish`
+  - `publish`: write Markdown and publish automatically
+
 ## Publish config
 
-Controls **what happens after the Markdown file is generated**.
+Controls **how the Markdown file is pushed after generation**.
 
 This is intentionally separate from `renderer`:
 
@@ -165,7 +179,7 @@ This is intentionally separate from `renderer`:
 ### Common knobs
 
 - `enabled`
-  - default `false`; set `true` when you want `render-hexo` / `pipeline` to publish automatically
+  - legacy alias for auto-publish; prefer `workflow.mode`
 - `mode`
   - `git`: commit and push through a local blog repository
   - `github-api`: push the generated file through GitHub Contents API
@@ -262,6 +276,7 @@ For the first release, keep defaults conservative:
 - one post at a time
 - one output format: Hexo Markdown
 - one config file: JSON
+- workflow defaults to `review`
 - publish disabled by default
 - secrets referenced by environment variable, not stored in the repo
 
