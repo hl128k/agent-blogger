@@ -4,5 +4,6 @@ __pycache__/
 .env
 .dist/
 dist/
+.planning/
 *.skill
 *.log
