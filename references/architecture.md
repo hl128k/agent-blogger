@@ -26,10 +26,35 @@ Primary goals for V1:
 Source material
   -> SessionSnapshot
   -> IssueContext
-  -> Prompt/Profile-guided ArticleDraft
+  -> Prompt/Profile-guided draft text
   -> Hexo Markdown
   -> optional Publisher
 ```
+
+## Module boundary map
+
+The implementation is intentionally split into small modules instead of one
+plugin registry.
+
+- `scripts/agent_blogger.py`
+  - CLI façade
+  - option parsing
+  - config loading
+  - wiring of source/reducer/renderer/publisher helpers
+- `scripts/agent_blogger_source.py`
+  - `TranscriptSource`
+  - host-session adapter
+  - transcript parsing and `SessionSnapshot` materialization
+- `scripts/agent_blogger_reducer.py`
+  - `ContextReducer`
+  - evidence-grounded `IssueContext` reduction
+- `scripts/agent_blogger_renderer.py`
+  - `DraftRenderer`
+  - prompt rendering
+  - Hexo Markdown rendering and output-path helpers
+- `scripts/agent_blogger_publisher.py`
+  - `Publisher`
+  - workflow mode and publish backends
 
 ## Stable extension points
 
@@ -42,11 +67,12 @@ Responsibility:
 - load transcript/session material
 - normalize different source formats
 - emit a `SessionSnapshot`
+- stay behind a small adapter boundary, not a plugin registry
 
 Initial implementations:
 
-- `openclaw-session-history`
-- `codex-jsonl`
+- `TranscriptSource` for transcript files
+- `HostSessionAdapter` for host-materialized current sessions
 
 ### 2. ContextReducer
 
@@ -55,6 +81,7 @@ Responsibility:
 - shrink large session material into a compact issue-oriented representation
 - extract commands, files, errors, environment hints, timeline facts
 - prepare compact reasoning input
+- keep the reducer as a small protocol object with explicit wiring
 
 ### 3. StyleProfile
 
@@ -81,6 +108,7 @@ Responsibility:
 - convert an `ArticleDraft` or `IssueContext` into final Markdown
 - apply target format rules
 - write front matter and body
+- keep renderer behavior behind a narrow `DraftRenderer` boundary
 
 Initial implementation:
 
@@ -94,6 +122,7 @@ Responsibility:
 - keep auth and transport outside the reducer
 - support a small number of explicit backends
 - obey the workflow mode (`draft`, `review`, `publish`)
+- keep publish choices behind a narrow `Publisher` boundary rather than a registry
 
 Initial implementations:
 
@@ -240,6 +269,8 @@ Keep these rules:
 - token secrets should not be hard-coded in config
 - the same rendered file can be pushed by local git or GitHub Contents API
 - the publish step should fail clearly if the destination repo or token is missing
+- new publish backends should be wired by swapping a small adapter object, not by
+  adding a dynamic plugin loader
 
 ## Recommended implementation bias
 

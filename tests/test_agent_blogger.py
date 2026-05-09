@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 from scripts.agent_blogger import (
+    IssueContext,
     Message,
     SessionSnapshot,
     SourceRequest,
@@ -25,6 +26,10 @@ from scripts.agent_blogger import (
     should_publish,
     workflow_mode,
 )
+from scripts.agent_blogger_publisher import Publisher
+from scripts.agent_blogger_reducer import ContextReducer
+from scripts.agent_blogger_renderer import DraftRenderer
+from scripts.agent_blogger_source import SourceAdapter, TranscriptSource
 
 
 def sample_config() -> dict:
@@ -86,6 +91,14 @@ def sample_config() -> dict:
     }
 
 
+def fixture_path(name: str) -> Path:
+    return Path(__file__).resolve().parent / "fixtures" / name
+
+
+def load_expected_noisy_context() -> dict:
+    return json.loads(fixture_path("expected_noisy_issue_context.json").read_text(encoding="utf-8"))
+
+
 class AgentBloggerTests(unittest.TestCase):
     def test_extract_helpers_find_key_context(self) -> None:
         text = """
@@ -115,6 +128,93 @@ class AgentBloggerTests(unittest.TestCase):
         self.assertEqual(errors, ["ERROR: permission denied while writing source/_posts/example.md"])
         self.assertIn("Ubuntu", environment["os"])
         self.assertIn("Python 3.12", environment["runtime"])
+
+    def test_noisy_codex_fixture_reduces_without_fabricated_conclusions(self) -> None:
+        expected = load_expected_noisy_context()["codex"]
+        snapshot = parse_jsonl(fixture_path("noisy_codex_session.jsonl"), "codex-jsonl")
+        issue = reduce_snapshot(snapshot, sample_config())
+        prompt = render_drafting_prompt(issue, sample_config())
+
+        for expected_command in expected["commands_contains"]:
+            self.assertTrue(any(expected_command in command for command in issue.commands_used), expected_command)
+        for expected_file in expected["files_contains"]:
+            self.assertTrue(any(expected_file in file_name for file_name in issue.files_changed), expected_file)
+        for expected_error in expected["errors_contains"]:
+            self.assertTrue(any(expected_error in symptom for symptom in issue.symptoms), expected_error)
+        for expected_env in expected["environment_contains"]:
+            self.assertTrue(
+                any(expected_env in value for values in issue.environment.values() for value in values),
+                expected_env,
+            )
+        for expected_attempt in expected["failed_attempts_contains"]:
+            self.assertTrue(any(expected_attempt in attempt for attempt in issue.failed_attempts), expected_attempt)
+        for expected_summary in expected["summary_contains"]:
+            self.assertIn(expected_summary, issue.summary)
+        for unexpected_summary in expected["summary_not_contains"]:
+            self.assertNotIn(unexpected_summary, issue.summary)
+
+        self.assertEqual(issue.root_cause, expected["root_cause"])
+        self.assertEqual(issue.fix, expected["fix"])
+        self.assertIn("# Reduced IssueContext", prompt)
+        self.assertIn('"failed_attempts"', prompt)
+        self.assertIn('"root_cause": "尚未自动确认"', prompt)
+        self.assertNotIn("最终收敛到一个可执行的处理方向或修复方案", prompt)
+        self.assertNotIn("逐步收敛到可执行结论", prompt)
+
+    def test_noisy_openclaw_markdown_fixture_keeps_explicit_conclusions(self) -> None:
+        expected = load_expected_noisy_context()["openclaw"]
+        snapshot = parse_markdown_like(fixture_path("noisy_openclaw_session.md"), "markdown-transcript")
+        issue = reduce_snapshot(snapshot, sample_config())
+        markdown = render_hexo(issue, sample_config())
+        prompt = render_drafting_prompt(issue, sample_config())
+
+        for expected_command in expected["commands_contains"]:
+            self.assertTrue(any(expected_command in command for command in issue.commands_used), expected_command)
+        for expected_file in expected["files_contains"]:
+            self.assertTrue(any(expected_file in file_name for file_name in issue.files_changed), expected_file)
+        for expected_error in expected["errors_contains"]:
+            self.assertTrue(any(expected_error in symptom for symptom in issue.symptoms), expected_error)
+        for expected_env in expected["environment_contains"]:
+            self.assertTrue(
+                any(expected_env in value for values in issue.environment.values() for value in values),
+                expected_env,
+            )
+        for expected_attempt in expected["failed_attempts_contains"]:
+            self.assertTrue(any(expected_attempt in attempt for attempt in issue.failed_attempts), expected_attempt)
+        for expected_summary in expected["summary_contains"]:
+            self.assertIn(expected_summary, issue.summary)
+
+        self.assertIn(expected["root_cause_contains"], issue.root_cause)
+        self.assertIn(expected["fix_contains"], issue.fix)
+        self.assertIn("## 背景", markdown)
+        self.assertIn("## 根因判断", markdown)
+        self.assertIn("## 解决方案", markdown)
+        self.assertIn("OpenClaw", markdown)
+        self.assertIn("Windows", markdown)
+        self.assertNotIn("failed_attempts", markdown)
+        self.assertIn('"failed_attempts"', prompt)
+        self.assertIn(expected["root_cause_contains"], prompt)
+        self.assertIn(expected["fix_contains"], prompt)
+
+    def test_noisy_fixture_pipeline_render_and_prompt_are_grounded(self) -> None:
+        unsupported_phrases = [
+            "最终收敛到一个可执行的处理方向或修复方案",
+            "逐步收敛到可执行结论",
+        ]
+
+        codex_snapshot = parse_jsonl(fixture_path("noisy_codex_session.jsonl"), "codex-jsonl")
+        codex_issue = reduce_snapshot(codex_snapshot, sample_config())
+        codex_prompt = render_drafting_prompt(codex_issue, sample_config())
+        codex_markdown = render_hexo(codex_issue, sample_config())
+
+        openclaw_snapshot = parse_markdown_like(fixture_path("noisy_openclaw_session.md"), "markdown-transcript")
+        openclaw_issue = reduce_snapshot(openclaw_snapshot, sample_config())
+        openclaw_prompt = render_drafting_prompt(openclaw_issue, sample_config())
+        openclaw_markdown = render_hexo(openclaw_issue, sample_config())
+
+        for rendered in (codex_prompt, codex_markdown, openclaw_prompt, openclaw_markdown):
+            for phrase in unsupported_phrases:
+                self.assertNotIn(phrase, rendered)
 
     def test_parse_jsonl_reduce_and_render_hexo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -196,6 +296,70 @@ class AgentBloggerTests(unittest.TestCase):
         self.assertEqual(workflow_mode({"workflow": {"mode": "publish"}}), "publish")
         self.assertTrue(should_publish({"workflow": {"mode": "draft"}}, publish=True))
         self.assertFalse(should_publish({"workflow": {"mode": "publish"}}, no_publish=True))
+
+    def test_module_boundaries_accept_custom_adapters(self) -> None:
+        class FakeSource:
+            def load(self, request: SourceRequest) -> SessionSnapshot:
+                self.request = request
+                return SessionSnapshot(
+                    source="fake-source",
+                    session_id="demo-session",
+                    title="Injected boundary",
+                    messages=[Message(role="user", text="Need a custom pipeline.")],
+                    commands=["git status --short"],
+                    files=["src/example.py"],
+                    errors=["ERROR: injected failure"],
+                    environment={"os": ["Linux"]},
+                )
+
+        class FakeReducer:
+            def reduce(self, snapshot: SessionSnapshot, config: dict) -> IssueContext:
+                return IssueContext(
+                    topic="Injected boundary",
+                    summary="custom summary",
+                    symptoms=["ERROR: injected failure"],
+                    investigation_steps=["custom step"],
+                    failed_attempts=["custom failure"],
+                    root_cause="custom root cause",
+                    fix="custom fix",
+                    files_changed=snapshot.files,
+                    commands_used=snapshot.commands,
+                    environment=snapshot.environment,
+                    lessons=["boundary adapters stay small"],
+                    keywords=["custom"],
+                )
+
+        class FakeRenderer:
+            def render_drafting_prompt(self, issue: IssueContext, config: dict) -> str:
+                return f"PROMPT::{issue.topic}"
+
+            def render_hexo(self, issue: IssueContext, config: dict) -> str:
+                return f"title: {issue.topic}\n\n# body"
+
+        class FakePublisher:
+            def publish(self, config: dict, issue: IssueContext, output_path: Path, publish: bool = False, no_publish: bool = False) -> None:
+                self.calls = [(publish, no_publish, output_path.name, issue.topic)]
+
+        self.assertIsInstance(FakeSource(), SourceAdapter)
+        self.assertIsInstance(FakeReducer(), ContextReducer)
+        self.assertIsInstance(FakeRenderer(), DraftRenderer)
+        self.assertIsInstance(FakePublisher(), Publisher)
+        self.assertIsInstance(TranscriptSource(), SourceAdapter)
+
+        source = FakeSource()
+        snapshot = source.load(SourceRequest(path="ignored.jsonl", source="codex-jsonl"))
+        issue = FakeReducer().reduce(snapshot, sample_config())
+        renderer = FakeRenderer()
+        publisher = FakePublisher()
+
+        rendered_prompt = renderer.render_drafting_prompt(issue, sample_config())
+        rendered_markdown = renderer.render_hexo(issue, sample_config())
+        publisher.publish(sample_config(), issue, Path("out.md"))
+
+        self.assertEqual(source.request.source, "codex-jsonl")
+        self.assertIn("Injected boundary", rendered_prompt)
+        self.assertIn("Injected boundary", rendered_markdown)
+        self.assertEqual(publisher.calls[0], (False, False, "out.md", "Injected boundary"))
 
     def test_example_config_exists_and_loads(self) -> None:
         example_path = Path(__file__).resolve().parents[1] / "agent-blogger.config.example.yaml"
