@@ -37,8 +37,27 @@ Keep publishing explicit and opt-in: generate the post first, then optionally pu
 Use one of these paths:
 
 - **OpenClaw current/recent session**: use session tools to gather the bounded history you need, then reduce it before drafting
-- **Codex transcript file**: parse JSONL/JSON/Markdown transcript files locally
+- **Codex transcript file**: parse JSONL/JSON/Markdown transcript files locally; use an explicit path such as `transcripts/codex-session.jsonl`
 - **Other sources**: only if they can be normalized into the same snapshot shape
+
+Source values:
+
+- file mode values: `auto`, `codex-jsonl`, `generic-json`, `markdown-transcript`
+- host materialized-session values: `current-session`, `openclaw-current-session`, `openclaw-session`, `openclaw-session-history`
+
+Resolution precedence:
+
+```text
+CLI --source-path or positional INPUT > config source.path > host current session
+CLI --source > config source.type > current-session
+CLI --session-key > config source.session_key
+CLI --base-dir > config source.base_dir
+```
+
+Semantics:
+
+- `base_dir only resolves relative transcript file paths`
+- `session_key is host session identity/metadata and does not participate in local path lookup`
 
 When the source is very large, prefer a targeted slice (specific time range, issue window, or message range) instead of the full history.
 

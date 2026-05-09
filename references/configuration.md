@@ -4,6 +4,8 @@
 
 V1 recommends YAML config, while keeping JSON compatible for older setups.
 
+The repository includes `agent-blogger.config.example.yaml` as a copyable baseline. For local use, copy it to `agent-blogger.config.yaml` and adjust paths, output folders, and publish settings.
+
 Reasons:
 
 - human-friendly for layered config
@@ -15,7 +17,7 @@ Reasons:
 
 ```yaml
 source:
-  type: current-session
+  type: codex-jsonl
   path: null
   session_key: null
   base_dir: .
@@ -109,15 +111,15 @@ Controls **where the transcript comes from**.
 Recommended knobs:
 
 - `type`
-  - `current-session` by default for host agents such as OpenClaw
-  - `openclaw-session` / `openclaw-session-history` when selecting a specific OpenClaw session
-  - `codex-jsonl`, `generic-json`, or `markdown-transcript` for file mode
+  - file mode values: `auto`, `codex-jsonl`, `generic-json`, `markdown-transcript`
+  - host materialized-session values: `current-session`, `openclaw-current-session`, `openclaw-session`, `openclaw-session-history`
 - `path`
   - optional local transcript path when using file mode
 - `session_key`
-  - optional OpenClaw session key; CLI `--session-key` overrides this value
+  - `session_key is host session identity/metadata and does not participate in local path lookup`
+  - optional host session identity/metadata; CLI `--session-key` overrides this value
 - `base_dir`
-  - base directory used to resolve a relative `path`
+  - base_dir only resolves relative transcript file paths
 
 Resolution precedence:
 
