@@ -1,0 +1,93 @@
+source:
+  type: codex-jsonl
+  path: null
+  session_key: null
+  base_dir: .
+
+content_profile:
+  include_system_env: true
+  include_dev_env: true
+  include_commands: true
+  include_file_changes: true
+  include_failed_attempts: true
+  include_timeline: false
+  include_raw_logs: false
+  max_message_chars: 4000
+
+style_profile:
+  tone: 简洁、直接、偏实战
+  perspective: first-person
+  language: zh-CN
+  verbosity: medium
+  intro_style: problem-first
+
+template_profile:
+  type: hexo-technical-post
+  section_order:
+    - background
+    - symptoms
+    - investigation
+    - root_cause
+    - fix
+    - environment
+    - files
+    - commands
+    - lesson
+  section_headings:
+    background: 背景
+    symptoms: 问题现象
+    investigation: 排查过程
+    root_cause: 根因判断
+    fix: 解决方案
+    environment: 环境信息
+    files: 涉及文件
+    commands: 关键命令
+    lesson: 复盘与经验
+  section_templates:
+    background: |-
+      {summary}
+
+      这篇记录采用 **{tone}** 的复盘方式，重点保留问题、处理过程和最终结论。
+  optional_sections:
+    - environment
+    - files
+    - commands
+
+prompt_profile:
+  system_prompt: 你是一名技术博客编辑，把结构化问题上下文整理成清晰、真实、可复盘的技术文章。不要编造不存在的环境、命令或结论。
+  draft_prompt_template: 请根据下面的 IssueContext 写一篇 {language} 技术博客。语气：{tone}。视角：{perspective}。模板：{template_type}。章节顺序：{section_order}。
+  include_reduced_context: true
+
+renderer:
+  type: hexo
+  post_dir: source/_posts
+  slug_pattern: "{date}-{slug}"
+  default_categories:
+    - AI开发
+    - Agent实践
+  default_tags:
+    - agent-blogger
+  front_matter:
+    author: hl128k
+    comments: true
+    toc: true
+
+workflow:
+  mode: review
+
+publish:
+  enabled: false
+  mode: git
+  git:
+    repo_dir: /path/to/blog
+    remote: origin
+    branch: main
+    commit: true
+    push: true
+    commit_message: "chore(blog): publish {title}"
+  github_api:
+    repo: owner/repo
+    branch: main
+    path_template: source/_posts/{filename}
+    token_env: GITHUB_TOKEN
+    commit_message: "chore(blog): publish {title}"

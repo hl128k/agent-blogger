@@ -19,7 +19,7 @@ except ImportError:  # pragma: no cover - optional at runtime
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol
 
 ROLE_HINTS = {
     "user": "user",
@@ -38,6 +38,13 @@ ENV_PATTERNS = {
     "os": re.compile(r"(?i)\b(ubuntu|debian|centos|alpine|linux|macos|windows|android|ios)\b"),
     "runtime": re.compile(r"(?i)\b(python\s*\d+(?:\.\d+)*|node(?:\.js)?\s*\d+(?:\.\d+)*|java\s*\d+(?:\.\d+)*|jdk\s*\d+(?:\.\d+)*|npm\s*\d+(?:\.\d+)*)\b"),
     "tools": re.compile(r"(?i)\b(openclaw|codex|hexo|git|github actions|github|docker|maven|gradle)\b"),
+}
+
+HOST_SOURCE_ALIASES = {
+    "current-session",
+    "openclaw-current-session",
+    "openclaw-session",
+    "openclaw-session-history",
 }
 
 DEFAULT_SECTION_ORDER = [
@@ -65,7 +72,7 @@ DEFAULT_SECTION_HEADINGS = {
 }
 
 SAMPLE_CONFIG = {
-    "source": {"type": "current-session", "path": None, "session_key": None, "base_dir": "."},
+    "source": {"type": "codex-jsonl", "path": None, "session_key": None, "base_dir": "."},
     "content_profile": {
         "include_system_env": True,
         "include_dev_env": True,
@@ -186,6 +193,58 @@ class IssueContext:
     keywords: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class SourceRequest:
+    path: str | None
+    source: str
+    base_dir: str | None = None
+    session_key: str | None = None
+
+
+class SourceAdapter(Protocol):
+    def load(self, request: SourceRequest) -> SessionSnapshot:
+        ...
+
+
+class TranscriptFileAdapter:
+    def load(self, request: SourceRequest) -> SessionSnapshot:
+        if not request.path:
+            raise ValueError("file transcript adapter requires a path")
+
+        path = resolve_source_path(request.path, request.base_dir)
+        if not path.exists():
+            raise FileNotFoundError(f"input not found: {path}")
+
+        source = request.source
+        if source == "auto":
+            if path.suffix.lower() == ".jsonl":
+                source = "codex-jsonl"
+            elif path.suffix.lower() == ".json":
+                source = "generic-json"
+            else:
+                source = "markdown-transcript"
+
+        if path.suffix.lower() == ".jsonl":
+            snapshot = parse_jsonl(path, source)
+        elif path.suffix.lower() == ".json":
+            snapshot = parse_json(path, source)
+        else:
+            snapshot = parse_markdown_like(path, source)
+        return snapshot
+
+
+class HostSessionAdapter:
+    def load(self, _request: SourceRequest) -> SessionSnapshot:
+        raise ValueError(
+            "current OpenClaw session input must be materialized by the host agent; "
+            "for CLI runs provide INPUT, --source-path, or source.path"
+        )
+
+
+FILE_SOURCE_ADAPTER = TranscriptFileAdapter()
+HOST_SESSION_ADAPTER = HostSessionAdapter()
+
+
 def add_publish_flags(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--publish", action="store_true", help="Publish after writing Markdown, overriding publish.enabled=false")
@@ -295,7 +354,7 @@ def resolve_source_path(path_str: str, base_dir: str | None = None) -> Path:
     return Path(base_dir).expanduser() / path
 
 
-def resolve_source_options(args: argparse.Namespace, config: dict[str, Any]) -> tuple[str, str, str | None, str | None]:
+def resolve_source_options(args: argparse.Namespace, config: dict[str, Any]) -> SourceRequest:
     source_config = config.get("source", {}) or {}
     if not isinstance(source_config, dict):
         raise TypeError("source config must be a mapping")
@@ -313,14 +372,17 @@ def resolve_source_options(args: argparse.Namespace, config: dict[str, Any]) -> 
         source = str(source_config.get("type") or "current-session")
 
     cli_base_dir = getattr(args, "base_dir", None)
-    base_dir = cli_base_dir if cli_base_dir is not None else (None if cli_path else source_config.get("base_dir"))
+    base_dir = cli_base_dir if cli_base_dir is not None else source_config.get("base_dir")
     session_key = getattr(args, "session_key", None) or source_config.get("session_key")
 
-    if not path:
-        if source in {"current-session", "openclaw-current-session", "openclaw-session", "openclaw-session-history"}:
-            raise ValueError("current OpenClaw session input must be collected by the host agent; for CLI runs provide INPUT, --source-path, or source.path")
+    if not path and source not in HOST_SOURCE_ALIASES:
         raise ValueError("missing transcript input; provide INPUT, --source-path, or source.path")
-    return str(path), source, str(base_dir) if base_dir else None, str(session_key) if session_key else None
+    return SourceRequest(
+        path=str(path) if path else None,
+        source=source,
+        base_dir=str(base_dir) if base_dir else None,
+        session_key=str(session_key) if session_key else None,
+    )
 
 
 def dedupe_keep_order(items: Iterable[str]) -> list[str]:
@@ -564,30 +626,18 @@ def parse_markdown_like(path: Path, source_name: str) -> SessionSnapshot:
     return snapshot
 
 
-def load_snapshot(path_str: str, source: str = "auto", base_dir: str | None = None, session_key: str | None = None) -> SessionSnapshot:
-    path = resolve_source_path(path_str, base_dir)
-    if not path.exists():
-        raise FileNotFoundError(f"input not found: {path}")
-
-    if source == "auto":
-        if path.suffix.lower() == ".jsonl":
-            source = "codex-jsonl"
-        elif path.suffix.lower() == ".json":
-            source = "generic-json"
-        else:
-            source = "markdown-transcript"
-
-    if path.suffix.lower() == ".jsonl":
-        snapshot = parse_jsonl(path, source)
-    elif path.suffix.lower() == ".json":
-        snapshot = parse_json(path, source)
+def load_snapshot(request: SourceRequest) -> SessionSnapshot:
+    if request.path:
+        snapshot = FILE_SOURCE_ADAPTER.load(request)
     else:
-        snapshot = parse_markdown_like(path, source)
+        if request.source not in HOST_SOURCE_ALIASES:
+            raise ValueError("missing transcript input; provide INPUT, --source-path, or source.path")
+        snapshot = HOST_SESSION_ADAPTER.load(request)
 
-    if base_dir:
-        snapshot.metadata.setdefault("base_dir", str(Path(base_dir).expanduser()))
-    if session_key:
-        snapshot.metadata["session_key"] = session_key
+    if request.base_dir:
+        snapshot.metadata.setdefault("base_dir", str(Path(request.base_dir).expanduser()))
+    if request.session_key:
+        snapshot.metadata["session_key"] = request.session_key
     return snapshot
 
 
@@ -653,6 +703,16 @@ def clamp_messages(messages: list[Message], max_chars: int) -> list[Message]:
     return result
 
 
+def derive_topic(snapshot: SessionSnapshot, user_messages: list[Message]) -> str:
+    if snapshot.title:
+        return safe_title(snapshot.title)
+    if user_messages:
+        return safe_title(first_sentence(user_messages[0].text))
+    if snapshot.session_id:
+        return safe_title(snapshot.session_id)
+    return "agent session recap"
+
+
 def reduce_snapshot(snapshot: SessionSnapshot, config: dict[str, Any]) -> IssueContext:
     content = config.get("content_profile", {})
     max_message_chars = int(content.get("max_message_chars", 4000))
@@ -660,7 +720,7 @@ def reduce_snapshot(snapshot: SessionSnapshot, config: dict[str, Any]) -> IssueC
     user_messages = [m for m in messages if m.role == "user" and m.text.strip()]
     assistant_messages = [m for m in messages if m.role == "assistant" and m.text.strip()]
 
-    topic = safe_title(snapshot.title or first_sentence(user_messages[0].text) if user_messages else snapshot.session_id or "agent session recap")
+    topic = derive_topic(snapshot, user_messages)
 
     summary_parts = []
     if user_messages:
@@ -1206,15 +1266,15 @@ def main() -> int:
 
     if args.command == "inspect":
         config = load_config(args.config) if args.config else {}
-        input_path, source, base_dir, session_key = resolve_source_options(args, config)
-        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
+        request = resolve_source_options(args, config)
+        snapshot = load_snapshot(request)
         print(json.dumps(snapshot_summary(snapshot), ensure_ascii=False, indent=2))
         return 0
 
     if args.command == "reduce":
         config = load_config(args.config)
-        input_path, source, base_dir, session_key = resolve_source_options(args, config)
-        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
+        request = resolve_source_options(args, config)
+        snapshot = load_snapshot(request)
         issue = reduce_snapshot(snapshot, config)
         payload = asdict(issue)
         if args.output:
@@ -1247,8 +1307,8 @@ def main() -> int:
 
     if args.command == "pipeline":
         config = load_config(args.config)
-        input_path, source, base_dir, session_key = resolve_source_options(args, config)
-        snapshot = load_snapshot(input_path, source, base_dir=base_dir, session_key=session_key)
+        request = resolve_source_options(args, config)
+        snapshot = load_snapshot(request)
         issue = reduce_snapshot(snapshot, config)
         markdown = render_hexo(issue, config)
         output_path = default_output_path(issue, config, args.output)
